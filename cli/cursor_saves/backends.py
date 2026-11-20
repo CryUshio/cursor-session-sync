@@ -10,6 +10,7 @@ backends just keep it in sync with a remote.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -69,39 +70,19 @@ class GitBackend(SyncBackend):
         return self._reset_to_origin()
 
     def push(self, snapshots_dir: Path) -> bool:
-        subprocess.run(
-            ["git", "add", "snapshots/"],
-            cwd=str(self.sync_dir), capture_output=True,
-        )
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            cwd=str(self.sync_dir), capture_output=True,
-        )
-        if result.returncode == 0:
-            return True  # nothing to commit
+        """Commit every local snapshot, then push once.
 
-        from . import paths
-        hostname = paths.get_machine_id()
-        msg = f"[{hostname}] sync snapshots"
-        subprocess.run(
-            ["git", "commit", "-m", msg],
-            cwd=str(self.sync_dir), capture_output=True,
-        )
-
-        if self.has_remote():
-            try:
-                push_result = subprocess.run(
-                    ["git", "push", "-u", "origin", "main"],
-                    cwd=str(self.sync_dir),
-                    capture_output=True, text=True, timeout=120,
-                )
-                if push_result.returncode != 0:
-                    print(f"  Push failed: {push_result.stderr.strip()}", file=sys.stderr)
-                    return False
-            except subprocess.TimeoutExpired:
-                print("  Push timed out", file=sys.stderr)
-                return False
-        return True
+        A second window waits on the same lock instead of pushing main together.
+        """
+        lock_path = Path.home() / ".config" / "cursaves" / "push.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = lock_path.open("a+")
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            return self._commit_and_push()
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
 
     def has_remote(self) -> bool:
         try:
@@ -118,6 +99,77 @@ class GitBackend(SyncBackend):
         return (self.sync_dir / ".git").exists()
 
     # -- Git-specific helpers -------------------------------------------
+
+    def _git(self, args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.sync_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    def _pending_push(self) -> bool:
+        dirty = self._git(["status", "--porcelain", "snapshots"])
+        if dirty.stdout.strip():
+            return True
+        if not self.has_remote():
+            return False
+        ahead = self._git(["rev-list", "--count", "origin/main..HEAD"])
+        if ahead.returncode != 0:
+            return True
+        return ahead.stdout.strip() not in ("", "0")
+
+    def _commit_and_push(self) -> bool:
+        if not self._pending_push():
+            print("Nothing to push")
+            return True
+        added = self._git(["add", "snapshots/"])
+        if added.returncode != 0:
+            print(f"  git add failed: {added.stderr.strip()}", file=sys.stderr)
+            return False
+        cached = self._git(["diff", "--cached", "--quiet"])
+        if cached.returncode != 0:
+            from . import paths
+            hostname = paths.get_machine_id()
+            committed = self._git(["commit", "-m", f"[{hostname}] sync snapshots"])
+            if committed.returncode != 0:
+                print(f"  git commit failed: {committed.stderr.strip()}", file=sys.stderr)
+                return False
+        if not self.has_remote():
+            return True
+        return self._push_main()
+
+    def _push_main(self) -> bool:
+        try:
+            pushed = self._git(["push", "-u", "origin", "main"])
+        except subprocess.TimeoutExpired:
+            print("  Push timed out", file=sys.stderr)
+            return False
+        if pushed.returncode == 0:
+            print("Pushed")
+            return True
+        detail = (pushed.stderr or pushed.stdout).strip()
+        print(f"  Push rejected, rebasing onto origin/main: {detail}", file=sys.stderr)
+        try:
+            fetched = self._git(["fetch", "origin", "main"], timeout=180)
+            if fetched.returncode != 0:
+                print(f"  Fetch failed: {fetched.stderr.strip()}", file=sys.stderr)
+                return False
+            rebased = self._git(["rebase", "origin/main"])
+            if rebased.returncode != 0:
+                self._git(["rebase", "--abort"])
+                print(f"  Rebase failed: {rebased.stderr.strip()}", file=sys.stderr)
+                return False
+            retried = self._git(["push", "-u", "origin", "main"])
+        except subprocess.TimeoutExpired:
+            print("  Push timed out", file=sys.stderr)
+            return False
+        if retried.returncode != 0:
+            print(f"  Push failed: {(retried.stderr or retried.stdout).strip()}", file=sys.stderr)
+            return False
+        print("Pushed")
+        return True
 
     def _reset_to_origin(self) -> bool:
         """Fetch + hard-reset to origin/main.  Remote is ground truth."""

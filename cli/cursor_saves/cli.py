@@ -1006,6 +1006,11 @@ def cmd_push(args):
     backend = get_backend()
     snapshots_dir = paths.get_snapshots_dir()
 
+    if getattr(args, "publish", False):
+        if not backend.push(snapshots_dir):
+            sys.exit(1)
+        return
+
     explicit = [cid for cid in (getattr(args, "composer_ids", None) or []) if cid]
     if explicit:
         project_path, workspace_dir, source_host = _resolve_project_and_workspace(args)
@@ -1018,6 +1023,8 @@ def cmd_push(args):
             print("No conversations found to checkpoint.", file=sys.stderr)
             sys.exit(1)
         print(f"  {len(saved)} conversation(s) checkpointed")
+        if getattr(args, "no_push", False):
+            return
         if not backend.has_remote():
             print("  No remote configured, skipping push", file=sys.stderr)
             sys.exit(1)
@@ -2316,6 +2323,16 @@ def main():
         action="append",
         dest="composer_ids",
         help="Push this composer id without a prompt (repeatable)",
+    )
+    p_push.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Write snapshots into the local sync repo and do not push",
+    )
+    p_push.add_argument(
+        "--publish",
+        action="store_true",
+        help="Commit snapshots already written locally, then push once",
     )
     p_push.set_defaults(func=cmd_push)
 

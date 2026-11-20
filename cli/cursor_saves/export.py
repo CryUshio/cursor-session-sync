@@ -1,6 +1,5 @@
 """Export and list operations -- read-only, safe to run while Cursor is open."""
 
-import gzip
 import json
 import os
 import sys
@@ -492,20 +491,15 @@ def export_conversation(
             _cdb.close()
 
 
-def _compress_snapshot(snapshot: dict) -> bytes:
-    """Compress a snapshot dict to gzip bytes."""
-    json_bytes = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
-    import io
-    buf = io.BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=9) as f:
-        f.write(json_bytes)
-    return buf.getvalue()
+def _snapshot_json(snapshot: dict) -> bytes:
+    """Pretty JSON so git can diff successive snapshots."""
+    return (json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 def save_snapshot(snapshot: dict, snapshots_dir: Path) -> Path:
-    """Save a snapshot dict to a compressed JSON file.
-    
-    If compressed size exceeds the limit, trims older messageContexts
+    """Save a snapshot dict as plain JSON.
+
+    If the JSON exceeds the limit, trims older messageContexts
     while keeping recent ones for seamless continuation.
 
     Returns the path to the saved file.
@@ -520,59 +514,42 @@ def save_snapshot(snapshot: dict, snapshots_dir: Path) -> Path:
 
     composer_id = snapshot["composerId"]
     
-    # Remove old uncompressed file if it exists
-    old_file = project_dir / f"{composer_id}.json"
-    if old_file.exists():
-        old_file.unlink()
-    
-    # Compress and check size
+    # Drop a previous gzip snapshot. The git repo stores plain JSON.
+    for old in project_dir.glob(f"{composer_id}.json.gz*"):
+        if not old.name.endswith(".meta.json"):
+            old.unlink()
+
     max_size = MAX_COMPRESSED_SIZE_MB * 1024 * 1024
-    compressed = _compress_snapshot(snapshot)
-    
+    payload = _snapshot_json(snapshot)
+
     # If too large, trim messageContexts and retry
-    if len(compressed) > max_size and snapshot.get("messageContexts"):
+    if len(payload) > max_size and snapshot.get("messageContexts"):
         contexts = snapshot["messageContexts"]
         # Binary search for acceptable context size
         # Start by keeping only recent contexts
         trimmed_contexts = _trim_message_contexts(contexts, max_size * 5)  # Rough estimate
         snapshot["messageContexts"] = trimmed_contexts
-        compressed = _compress_snapshot(snapshot)
-        
+        payload = _snapshot_json(snapshot)
+
         # If still too large, keep removing contexts
-        while len(compressed) > max_size and len(snapshot.get("messageContexts", {})) > MAX_RECENT_CONTEXTS:
+        while len(payload) > max_size and len(snapshot.get("messageContexts", {})) > MAX_RECENT_CONTEXTS:
             # Remove half of the remaining non-recent contexts
             sorted_keys = sorted(snapshot["messageContexts"].keys())
             keep_keys = sorted_keys[len(sorted_keys)//2:]  # Keep newer half
             snapshot["messageContexts"] = {k: snapshot["messageContexts"][k] for k in keep_keys}
-            compressed = _compress_snapshot(snapshot)
-        
-        # If still too large even with only recent contexts, remove contexts entirely
-        if len(compressed) > max_size:
-            snapshot["messageContexts"] = {}
-            compressed = _compress_snapshot(snapshot)
-    
-    # Clean up any previous shards or single file
-    for old in project_dir.glob(f"{composer_id}.json.gz*"):
-        if not old.name.endswith(".meta.json"):
-            old.unlink()
+            payload = _snapshot_json(snapshot)
 
-    # Save snapshot (shard if too large for GitHub)
-    snapshot_file = project_dir / f"{composer_id}.json.gz"
-    if len(compressed) > SHARD_SIZE_BYTES:
-        num_shards = 0
-        for i in range(0, len(compressed), SHARD_SIZE_BYTES):
-            shard_path = project_dir / f"{composer_id}.json.gz.{i // SHARD_SIZE_BYTES:02d}"
-            shard_path.write_bytes(compressed[i:i + SHARD_SIZE_BYTES])
-            num_shards += 1
-        print(f"  Sharded into {num_shards} parts ({len(compressed) / 1024 / 1024:.1f} MB total)")
-    else:
-        snapshot_file.write_bytes(compressed)
+        # If still too large even with only recent contexts, remove contexts entirely
+        if len(payload) > max_size:
+            snapshot["messageContexts"] = {}
+            payload = _snapshot_json(snapshot)
+
+    snapshot_file = project_dir / f"{composer_id}.json"
+    snapshot_file.write_bytes(payload)
 
     # Write lightweight metadata sidecar (avoids decompressing for listings)
     cd = snapshot.get("composerData", {})
     num_shards = 0
-    if len(compressed) > SHARD_SIZE_BYTES:
-        num_shards = (len(compressed) + SHARD_SIZE_BYTES - 1) // SHARD_SIZE_BYTES
     bubble_ids: list[str] = []
     seen_bubbles: set[str] = set()
     for header in cd.get("fullConversationHeadersOnly") or []:

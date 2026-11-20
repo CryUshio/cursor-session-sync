@@ -54,6 +54,8 @@ let booted = false;
 let booting = false;
 let askedAuth = false;
 let repoScanTimer: ReturnType<typeof setTimeout> | undefined;
+let gitWatchTimer: ReturnType<typeof setTimeout> | undefined;
+let originKey = "";
 
 export function activate(context: vscode.ExtensionContext): void {
   extensionPath = context.extensionPath;
@@ -98,9 +100,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       warnedNoRemote = false;
+      originKey = "";
       void noteCurrentFolder();
       repoPanel?.rescan();
     }),
+    watchGitConfig(),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("cursorSessionSync.language")) {
         void refreshLanguage();
@@ -123,6 +127,10 @@ export async function deactivate(): Promise<void> {
   if (repoScanTimer) {
     clearTimeout(repoScanTimer);
     repoScanTimer = undefined;
+  }
+  if (gitWatchTimer) {
+    clearTimeout(gitWatchTimer);
+    gitWatchTimer = undefined;
   }
   if (timer) {
     clearInterval(timer);
@@ -265,8 +273,14 @@ async function doPoll(): Promise<void> {
   const conversations = payload.conversations ?? [];
   const ahead = conversations.filter((row) => row.status === "local_ahead" && row.projectPath);
   note(t(`勾选的仓库里有 ${ahead.length} 个会话需要从本机上传`, `${ahead.length} chats in selected repositories need uploading`));
-  const uploaded = await pushAhead(ahead);
-  if (!uploaded) {
+  const exported = await exportAhead(ahead);
+  const published = await publishSnapshots(ahead.length === 0);
+  if (published) {
+    for (const id of exported.ids) {
+      queued.add(`push:${id}`);
+    }
+  }
+  if (!exported.ok || !published) {
     return;
   }
   setSyncState("synced", ahead.length ? t(`已上传 ${ahead.length} 个会话`, `Uploaded ${ahead.length} chats`) : t("没有新的本机会话需要上传", "No new local chats to upload"));
@@ -274,8 +288,9 @@ async function doPoll(): Promise<void> {
   await promptDiverged(conversations.filter((row) => row.status === "diverged"));
 }
 
-async function pushAhead(rows: Conversation[]): Promise<boolean> {
+async function exportAhead(rows: Conversation[]): Promise<{ ok: boolean; ids: string[] }> {
   const groups = new Map<string, Conversation[]>();
+  const ids: string[] = [];
   for (const row of rows) {
     if (!row.projectPath || !row.composerId) {
       continue;
@@ -291,7 +306,7 @@ async function pushAhead(rows: Conversation[]): Promise<boolean> {
     if (fresh.length === 0) {
       continue;
     }
-    const args = ["push", "-p", fresh[0].projectPath];
+    const args = ["push", "--no-push", "-p", fresh[0].projectPath];
     if (fresh[0].workspaceDir) {
       args.push("-w", basename(fresh[0].workspaceDir));
     }
@@ -299,21 +314,42 @@ async function pushAhead(rows: Conversation[]): Promise<boolean> {
       args.push("--composer", row.composerId);
     }
     const label = fresh.map((row) => row.name || row.composerId).join("、");
-    setSyncState("syncing", t(`正在上传 ${label}`, `Uploading ${label}`));
+    setSyncState("syncing", t(`正在写入本地快照 ${label}`, `Writing local snapshot ${label}`));
     try {
       const result = await runCursaves(args);
       note([result.stdout, result.stderr].filter((part) => part.trim()).join("\n"));
       for (const row of fresh) {
-        queued.add(`push:${row.composerId}`);
+        if (row.composerId) {
+          ids.push(row.composerId);
+        }
       }
     } catch (err) {
       ok = false;
-      const uploadError = t(`上传失败：${errorText(err)}`, `Upload failed: ${errorText(err)}`);
+      const uploadError = t(`写入本地快照失败：${errorText(err)}`, `Could not write the local snapshot: ${errorText(err)}`);
       setSyncState("error", uploadError);
-      void vscode.window.showErrorMessage(t(`推送会话失败：${errorText(err)}`, `Could not push chats: ${errorText(err)}`));
+      void vscode.window.showErrorMessage(uploadError);
     }
   }
-  return ok;
+  return { ok, ids };
+}
+
+async function publishSnapshots(quiet: boolean): Promise<boolean> {
+  if (!quiet) {
+    setSyncState("syncing", t("正在提交并推送", "Committing and pushing"));
+  }
+  try {
+    const result = await runCursaves(["push", "--publish"]);
+    const output = [result.stdout, result.stderr].filter((part) => part.trim()).join("\n");
+    if (output && !output.includes("Nothing to push")) {
+      note(output);
+    }
+    return true;
+  } catch (err) {
+    const uploadError = t(`推送失败：${errorText(err)}`, `Push failed: ${errorText(err)}`);
+    setSyncState("error", uploadError);
+    void vscode.window.showErrorMessage(t(`推送会话失败：${errorText(err)}`, `Could not push chats: ${errorText(err)}`));
+    return false;
+  }
 }
 
 async function queueIncoming(rows: Conversation[]): Promise<void> {
@@ -1073,6 +1109,53 @@ async function noteCurrentFolder(): Promise<void> {
   }
   syncStatus.text = `$(warning) ${text}`;
   syncStatus.tooltip = `${text}${t("，不会出现在同步列表", ", so it will not appear in the sync list")}`;
+}
+
+function watchGitConfig(): vscode.Disposable {
+  const watcher = vscode.workspace.createFileSystemWatcher("**/.git/config");
+  const kick = () => scheduleGitRescan();
+  watcher.onDidChange(kick);
+  watcher.onDidCreate(kick);
+  void rememberOrigin();
+  return watcher;
+}
+
+function scheduleGitRescan(): void {
+  if (gitWatchTimer) {
+    clearTimeout(gitWatchTimer);
+  }
+  gitWatchTimer = setTimeout(() => {
+    gitWatchTimer = undefined;
+    if (stopped) {
+      return;
+    }
+    void rescanIfOriginChanged();
+  }, 600);
+}
+
+async function rememberOrigin(): Promise<void> {
+  const key = await currentOriginKey();
+  if (!originKey) {
+    originKey = key;
+  }
+}
+
+async function rescanIfOriginChanged(): Promise<void> {
+  const next = await currentOriginKey();
+  if (next === originKey) {
+    return;
+  }
+  originKey = next;
+  warnedNoRemote = false;
+  void noteCurrentFolder();
+  repoPanel?.rescan();
+}
+
+function currentOriginKey(): Promise<string> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  return Promise.all(folders.map(async (folder) => `${folder.uri.fsPath}\t${await folderGitKind(folder.uri.fsPath)}`)).then((parts) =>
+    parts.join("\n"),
+  );
 }
 
 function folderGitKind(dir: string): Promise<"remote" | "noremote" | "norepo"> {

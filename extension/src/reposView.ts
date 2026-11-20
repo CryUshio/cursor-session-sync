@@ -19,7 +19,7 @@ export class RepoManagerView implements vscode.WebviewViewProvider {
   private pendingPaint = false;
   private progressTitle = t("同步中", "Syncing");
   private progressLines: string[] = [];
-  // ponytail: one in-memory list per window. New chats stay hidden until Refresh or a folder change.
+  // ponytail: one in-memory list per window. New chats stay hidden until Rescan, a folder change, or a git remote edit.
   private cache: RepoCache | undefined;
   private scanning: Promise<void> | undefined;
   private generation = 0;
@@ -111,7 +111,11 @@ export class RepoManagerView implements vscode.WebviewViewProvider {
       await this.scanning;
       return;
     }
-    this.renderScanning();
+    if (this.cache) {
+      this.render(true);
+    } else {
+      this.renderScanning();
+    }
     await this.scan(force);
   }
 
@@ -157,14 +161,14 @@ export class RepoManagerView implements vscode.WebviewViewProvider {
     return { repos: payload.repos ?? [], currentRemote: payload.currentRemote !== false };
   }
 
-  private render(): void {
+  private render(scanning = false): void {
     const webview = this.view?.webview;
     if (!webview || !this.view?.visible || !this.cache) {
       this.pendingPaint = true;
       return;
     }
     this.pendingPaint = false;
-    webview.html = this.page(this.cache.repos, checkedIds(this.cache.repos), "");
+    webview.html = this.page(this.cache.repos, checkedIds(this.cache.repos), "", scanning);
   }
 
   private renderScanning(): void {
@@ -287,8 +291,8 @@ function renderPage(
   h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
   .hint, .meta { color: var(--vscode-descriptionForeground); font-size: 12px; }
   .hint { margin: 0 0 12px; line-height: 1.4; }
-  .toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 4px 10px; border-radius: 2px; cursor: pointer; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 4px 10px; border-radius: 2px; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
   button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
   .row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--vscode-widget-border); cursor: pointer; }
   .name, .meta { display: block; word-break: break-all; white-space: pre-wrap; }
@@ -316,6 +320,7 @@ function renderPage(
   <div class="toolbar">
     <button id="all" class="secondary" type="button">${escapeHtml(t("全选", "All"))}</button>
     <button id="none" class="secondary" type="button">${escapeHtml(t("全不选", "None"))}</button>
+    <button id="refresh" class="secondary" type="button">${escapeHtml(t("重新扫描", "Rescan"))}</button>
     <button id="save" type="button">${escapeHtml(t("保存", "Save"))}</button>
   </div>
   <form id="repos">${rows}</form>
@@ -340,9 +345,11 @@ function renderPage(
     }
     const all = document.getElementById('all');
     const none = document.getElementById('none');
+    const refresh = document.getElementById('refresh');
     const save = document.getElementById('save');
     if (all) all.onclick = () => visibleBoxes().forEach((box) => { box.checked = true; });
     if (none) none.onclick = () => visibleBoxes().forEach((box) => { box.checked = false; });
+    if (refresh) refresh.onclick = () => vscode.postMessage({ type: 'refresh' });
     if (save) {
       save.onclick = () => {
         vscode.postMessage({ type: 'save', ids: boxes().filter((box) => box.checked).map((box) => box.value) });

@@ -2,7 +2,7 @@
   "name": "cursor-session-sync",
   "displayName": "Cursor Session Sync",
   "description": "%extension.description%",
-  "version": "0.2.19",
+  "version": "0.2.24",
   "publisher": "cryushio",
   "license": "MIT",
   "engines": {
