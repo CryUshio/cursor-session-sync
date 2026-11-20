@@ -1,0 +1,117 @@
+{
+  "name": "cursor-session-sync",
+  "displayName": "Cursor Session Sync",
+  "description": "%extension.description%",
+  "version": "0.2.19",
+  "publisher": "cryushio",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished", "onView:cursorSessionSync.repos"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorSessionSync.connect",
+        "title": "%command.connect%"
+      },
+      {
+        "command": "cursorSessionSync.manageRepos",
+        "title": "%command.manageRepos%"
+      },
+      {
+        "command": "cursorSessionSync.configure",
+        "title": "%command.configure%"
+      },
+      {
+        "command": "cursorSessionSync.checkNow",
+        "title": "%command.checkNow%"
+      }
+    ],
+    "configuration": {
+      "title": "%config.title%",
+      "properties": {
+        "cursorSessionSync.language": {
+          "type": "string",
+          "enum": ["auto", "zh", "en"],
+          "enumDescriptions": ["%config.language.auto%", "%config.language.zh%", "%config.language.en%"],
+          "default": "auto",
+          "description": "%config.language%"
+        },
+        "cursorSessionSync.remoteUrl": {
+          "type": "string",
+          "default": "",
+          "description": "%config.remoteUrl%"
+        },
+        "cursorSessionSync.pollSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "description": "%config.pollSeconds%"
+        },
+        "cursorSessionSync.includeRemote": {
+          "type": "string",
+          "default": "",
+          "description": "%config.includeRemote%"
+        },
+        "cursorSessionSync.reposChosen": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.reposChosen%"
+        },
+        "cursorSessionSync.excludeRemote": {
+          "type": "string",
+          "default": "",
+          "description": "%config.excludeRemote%"
+        },
+        "cursorSessionSync.maxAgeDays": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "%config.maxAgeDays%"
+        },
+        "cursorSessionSync.onDiverged": {
+          "type": "string",
+          "enum": ["ask", "fork", "skip", "merge"],
+          "default": "ask",
+          "description": "%config.onDiverged%"
+        },
+        "cursorSessionSync.cursavesPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.cursavesPath%"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cursorSessionSync",
+          "title": "%view.container%",
+          "icon": "media/sync.svg"
+        }
+      ]
+    },
+    "views": {
+      "cursorSessionSync": [
+        {
+          "type": "webview",
+          "id": "cursorSessionSync.repos",
+          "name": "%view.repos%"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node scripts/bundle-cli.mjs && tsc -p .",
+    "check": "tsc -p . --noEmit",
+    "vscode:prepublish": "node scripts/bundle-cli.mjs && tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.0"
+  }
+}

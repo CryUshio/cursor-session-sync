@@ -1,0 +1,9 @@
+src/**
+scripts/**
+tsconfig.json
+**/*.map
+**/*.ts
+node_modules/**
+.vscode/**
+vendor/**/__pycache__/**
+vendor/**/*.pyc

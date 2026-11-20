@@ -1,0 +1,22 @@
+{
+  "extension.description": "把 Cursor 会话同步到你的私有 GitHub 仓库。导入的会话在 Cursor 完全退出后出现。",
+  "command.connect": "Cursor Session Sync: 连接 GitHub",
+  "command.manageRepos": "Cursor Session Sync: 管理同步仓库",
+  "command.configure": "Cursor Session Sync: 配置",
+  "command.checkNow": "Cursor Session Sync: 立即检查",
+  "config.title": "Cursor Session Sync",
+  "config.language": "界面语言。auto 跟随 Cursor，zh 中文，en 英文。",
+  "config.language.auto": "跟随 Cursor 的显示语言",
+  "config.language.zh": "中文",
+  "config.language.en": "英文",
+  "config.remoteUrl": "GitHub 授权后自动写入的私有仓库地址，不用手填",
+  "config.pollSeconds": "轮询同步状态的间隔秒数",
+  "config.includeRemote": "由「同步仓库」界面勾选写入",
+  "config.reposChosen": "是否已经在管理界面确认过要同步的仓库",
+  "config.excludeRemote": "跳过这些 Git remote，逗号分隔",
+  "config.maxAgeDays": "忽略比这更旧的会话。0 表示不限制",
+  "config.onDiverged": "两边都有新消息时的默认策略。ask 会弹出选择",
+  "config.cursavesPath": "留空则使用扩展自带的同步程序",
+  "view.container": "会话同步",
+  "view.repos": "同步仓库"
+}

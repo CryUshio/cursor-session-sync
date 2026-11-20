@@ -1,0 +1,22 @@
+{
+  "extension.description": "Sync Cursor chats to your private GitHub repository. Imported chats show up after Cursor quits.",
+  "command.connect": "Cursor Session Sync: Connect GitHub",
+  "command.manageRepos": "Cursor Session Sync: Choose Repositories",
+  "command.configure": "Cursor Session Sync: Settings",
+  "command.checkNow": "Cursor Session Sync: Check Now",
+  "config.title": "Cursor Session Sync",
+  "config.language": "Interface language. auto follows Cursor, zh is Chinese, en is English.",
+  "config.language.auto": "Follow Cursor's display language",
+  "config.language.zh": "Chinese",
+  "config.language.en": "English",
+  "config.remoteUrl": "Private repository URL written after GitHub sign-in. Do not fill this in by hand.",
+  "config.pollSeconds": "How often to check sync status, in seconds",
+  "config.includeRemote": "Written by the repository checklist",
+  "config.reposChosen": "Whether the repository checklist has been saved",
+  "config.excludeRemote": "Skip these Git remotes, separated by commas",
+  "config.maxAgeDays": "Ignore chats older than this many days. 0 means no limit.",
+  "config.onDiverged": "What to do when both sides have new messages. ask shows a choice.",
+  "config.cursavesPath": "Leave empty to use the sync program bundled with the extension",
+  "view.container": "Session Sync",
+  "view.repos": "Sync Repositories"
+}
